@@ -92,7 +92,7 @@
       use ice_therm_mushy, only: a_rapid_mode, Rac_rapid_mode, aspect_rapid_mode, &
                                  dSdt_slow_mode, phi_c_slow_mode, &
                                  phi_i_mushy
-      use ice_restoring, only: restore_ice
+      use ice_restoring, only: restore_ice, open_bdy_outflow
 #ifdef CCSMCOUPLED
       use shr_file_mod, only: shr_file_setIO
 #endif
@@ -165,7 +165,7 @@
         oceanmixed_ice, ocn_data_format, sss_data_type, sst_data_type,  &
         ocn_data_dir,   oceanmixed_file, restore_sst,   trestore,       &
         restore_ice,    formdrag,        highfreq,      natmiter,       &
-        tfrz_option
+        tfrz_option,    open_bdy_outflow
 
       namelist /tracer_nml/   &
         tr_iage, restart_age, &
@@ -300,6 +300,7 @@
       restore_sst     = .false.   ! restore sst if true
       trestore        = 90        ! restoring timescale, days (0 instantaneous)
       restore_ice     = .false.   ! restore ice state on grid edges if true
+      open_bdy_outflow = .false.  ! let ice flow out through open boundaries
       dbug      = .false.         ! true writes diagnostics for input forcing
 
       latpnt(1) =  90._dbl_kind   ! latitude of diagnostic point 1 (deg)
@@ -758,6 +759,7 @@
       call broadcast_scalar(restore_sst,        master_task)
       call broadcast_scalar(trestore,           master_task)
       call broadcast_scalar(restore_ice,        master_task)
+      call broadcast_scalar(open_bdy_outflow,   master_task)
       call broadcast_scalar(dbug,               master_task)
       call broadcast_array (latpnt(1:2),        master_task)
       call broadcast_array (lonpnt(1:2),        master_task)
@@ -989,6 +991,8 @@
          endif 
          write(nu_diag,1010) ' restore_ice               = ', &
                                restore_ice
+         write(nu_diag,1010) ' open_bdy_outflow          = ', &
+                               open_bdy_outflow
          if (restore_ice .or. restore_sst) &
          write(nu_diag,1020) ' trestore                  = ', trestore
  

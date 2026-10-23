@@ -1080,6 +1080,7 @@
       use ice_timers, only: ice_timer_start, ice_timer_stop, timer_column, &
           timer_ridge, timer_bound
       use ice_transport_driver, only: advection, transport_upwind, transport_remap
+      use ice_restoring, only: ice_open_bdy_velocity
 
       real (kind=dbl_kind), intent(in) :: &
          dt      ! time step
@@ -1105,6 +1106,9 @@
 
       if (kdyn == 1) call evp (dt)
       if (kdyn == 2) call eap (dt)
+
+      ! velocity on open boundaries (if open_bdy_outflow)
+      call ice_open_bdy_velocity
 
       !-----------------------------------------------------------------
       ! Horizontal ice transport

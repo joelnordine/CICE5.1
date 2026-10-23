@@ -19,11 +19,12 @@
 
       implicit none
       private
-      public :: ice_HaloRestore_init, ice_HaloRestore
+      public :: ice_HaloRestore_init, ice_HaloRestore, ice_open_bdy_velocity
       save
 
       logical (kind=log_kind), public :: &
-         restore_ice                 ! restore ice state if true
+         restore_ice             , & ! restore ice state if true
+         open_bdy_outflow            ! let ice flow out through open boundaries
 
       !-----------------------------------------------------------------
       ! state of the ice for each category
@@ -1019,7 +1020,7 @@
 
             do j = 1, ny_block
               do i = 1, ilo
-                if (umask(i,j,iblk)) then
+                if (umask(i,j,iblk) .and. .not. open_bdy_outflow) then
                   uvel(i,j,iblk) = uvel(ilo+1,j,iblk)
                   vvel(i,j,iblk) = c0 ! make ice drift strictly normal to boundary
                   strength(i,j,iblk) = strength(ilo+1,j,iblk)
@@ -1068,7 +1069,7 @@
 
             do j = 1, ny_block
               do i = ihi, ibc
-                if (umask(i,j,iblk)) then
+                if (umask(i,j,iblk) .and. .not. open_bdy_outflow) then
                   uvel(i,j,iblk) = uvel(ihi-1,j,iblk)
                   vvel(i,j,iblk) = c0
                   strength(i,j,iblk) = strength(ihi-1,j,iblk)
@@ -1105,7 +1106,7 @@
 
             do j = 1, jlo
               do i = 1, nx_block
-                if (umask(i,j,iblk)) then
+                if (umask(i,j,iblk) .and. .not. open_bdy_outflow) then
                   uvel(i,j,iblk) = c0
                   vvel(i,j,iblk) = vvel(i,jlo+1,iblk)
                   strength(i,j,iblk) = strength(i,jlo+1,iblk)
@@ -1156,7 +1157,7 @@
 
             do j = jhi, ibc
               do i = 1, nx_block
-                if (umask(i,j,iblk)) then
+                if (umask(i,j,iblk) .and. .not. open_bdy_outflow) then
                   uvel(i,j,iblk) = c0
                   vvel(i,j,iblk) = vvel(i,jhi-1,iblk)
                   strength(i,j,iblk) = strength(i,jhi-1,iblk)
@@ -1184,6 +1185,92 @@
    call ice_timer_stop(timer_bound)
 
  end subroutine ice_HaloRestore
+
+!=======================================================================
+
+!  Set the ice velocity on open domain boundaries so that ice can be
+!  advected out of a regional domain.
+!  The velocity points on the outer edge of the domain lie in the halo
+!  (west and south edges) or are masked as land because they touch a
+!  ghost cell (east and north edges), so the dynamics leave them at zero
+!  and no ice can cross the boundary. Here the normal velocity on the
+!  boundary is copied from the adjacent interior velocity point where it
+!  is directed out of the domain. Inward velocities and the tangential
+!  component are set to zero; ice enters through ice_HaloRestore.
+!  Call after the dynamics and before the transport.
+!  Note: This routine assumes nghost = 1.
+
+ subroutine ice_open_bdy_velocity
+
+      use ice_blocks, only: block, get_block, nblocks_x, nblocks_y
+      use ice_constants, only: c0
+      use ice_domain, only: ew_boundary_type, ns_boundary_type, &
+          nblocks, blocks_ice
+
+   integer (int_kind) :: &
+     i,j,iblk,           &! dummy loop indices
+     ilo,ihi,jlo,jhi      ! beginning and end of physical domain
+
+   type (block) :: &
+     this_block  ! block info for current block
+
+   if (.not. open_bdy_outflow) return
+
+   call ice_timer_start(timer_bound)
+
+   !$OMP PARALLEL DO PRIVATE(iblk,ilo,ihi,jlo,jhi,this_block,i,j)
+   do iblk = 1, nblocks
+      this_block = get_block(blocks_ice(iblk),iblk)
+         ilo = this_block%ilo
+         ihi = this_block%ihi
+         jlo = this_block%jlo
+         jhi = this_block%jhi
+
+      ! The loops include the halo rows/columns of the block, which hold
+      ! valid velocities from the neighboring blocks after the dynamics.
+
+      if (this_block%iblock == 1) then              ! west edge
+         if (trim(ew_boundary_type) == 'open') then
+            do j = 1, ny_block
+               uvel(ilo-1,j,iblk) = min(uvel(ilo,j,iblk), c0)
+               vvel(ilo-1,j,iblk) = c0
+            enddo
+         endif
+      endif
+
+      if (this_block%iblock == nblocks_x) then      ! east edge
+         if (trim(ew_boundary_type) == 'open') then
+            do j = 1, ny_block
+               uvel(ihi,j,iblk) = max(uvel(ihi-1,j,iblk), c0)
+               vvel(ihi,j,iblk) = c0
+            enddo
+         endif
+      endif
+
+      if (this_block%jblock == 1) then              ! south edge
+         if (trim(ns_boundary_type) == 'open') then
+            do i = 1, nx_block
+               uvel(i,jlo-1,iblk) = c0
+               vvel(i,jlo-1,iblk) = min(vvel(i,jlo,iblk), c0)
+            enddo
+         endif
+      endif
+
+      if (this_block%jblock == nblocks_y) then      ! north edge
+         if (trim(ns_boundary_type) == 'open') then
+            do i = 1, nx_block
+               uvel(i,jhi,iblk) = c0
+               vvel(i,jhi,iblk) = max(vvel(i,jhi-1,iblk), c0)
+            enddo
+         endif
+      endif
+
+   enddo ! iblk
+   !$OMP END PARALLEL DO
+
+   call ice_timer_stop(timer_bound)
+
+ end subroutine ice_open_bdy_velocity
 
 !=======================================================================
 

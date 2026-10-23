@@ -320,8 +320,10 @@
       use ice_constants, only: c0, p5, &
           field_loc_center, field_type_scalar, &
           field_loc_NEcorner, field_type_vector
-      use ice_domain, only: nblocks, blocks_ice, halo_info, maskhalo_remap
+      use ice_domain, only: nblocks, blocks_ice, halo_info, maskhalo_remap, &
+          ew_boundary_type, ns_boundary_type
       use ice_blocks, only: block, get_block, nghost, nx_block, ny_block
+      use ice_restoring, only: open_bdy_outflow
       use ice_grid, only: HTE, HTN, dxu, dyu,       &
                           tarea, tarear, hm,                  &
                           xav, yav, xxav, yyav
@@ -578,6 +580,35 @@
                               field_loc_NEcorner, field_type_vector)
          call ice_HaloUpdate (dpy,                halo_info, &
                               field_loc_NEcorner, field_type_vector)
+
+         ! The halo update sets the departure points on open west and
+         ! south boundaries to zero; compute them from the boundary
+         ! velocities (see ice_open_bdy_velocity) so ice can flow out.
+         if (open_bdy_outflow) then
+            !$OMP PARALLEL DO PRIVATE(iblk,this_block,ilo,jlo,i,j)
+            do iblk = 1, nblocks
+               this_block = get_block(blocks_ice(iblk),iblk)
+               ilo = this_block%ilo
+               jlo = this_block%jlo
+
+               if (this_block%iblock == 1 .and. &
+                   trim(ew_boundary_type) == 'open') then
+                  do j = 1, ny_block
+                     dpx(ilo-1,j,iblk) = -dt*uvel(ilo-1,j,iblk)
+                     dpy(ilo-1,j,iblk) = -dt*vvel(ilo-1,j,iblk)
+                  enddo
+               endif
+
+               if (this_block%jblock == 1 .and. &
+                   trim(ns_boundary_type) == 'open') then
+                  do i = 1, nx_block
+                     dpx(i,jlo-1,iblk) = -dt*uvel(i,jlo-1,iblk)
+                     dpy(i,jlo-1,iblk) = -dt*vvel(i,jlo-1,iblk)
+                  enddo
+               endif
+            enddo
+            !$OMP END PARALLEL DO
+         endif
 
          ! mass field
          call ice_HaloUpdate (mc,               halo_info, &
