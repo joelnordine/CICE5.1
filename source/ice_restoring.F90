@@ -1218,6 +1218,15 @@
          endif
       endif
 
+   enddo ! iblk
+   !$OMP END PARALLEL DO
+
+   call bound_state (aicen, trcrn, vicen, vsnon)
+
+   ! aggregate after the halo update, so that the aggregated fields in the
+   ! halo cells are consistent with the neighboring blocks
+   !$OMP PARALLEL DO PRIVATE(iblk)
+   do iblk = 1, nblocks
       call aggregate (nx_block,          ny_block,             &
                       aicen(:,:,:,iblk),                       &
                       trcrn(:,:,1:ntrcr,:,iblk),               &
@@ -1229,8 +1238,6 @@
                       ntrcr, trcr_depend(1:ntrcr)) 
    enddo ! iblk
    !$OMP END PARALLEL DO
-
-   call bound_state (aicen, trcrn, vicen, vsnon)
 
    call ice_timer_stop(timer_bound)
 
