@@ -1723,7 +1723,6 @@
                   icells = icells + 1
                   indxi(icells) = i
                   indxj(icells) = j
-                  hice_ext (i,j,1) = hice_ext(i,j,1)/aice_ext(i,j,1)
                endif            ! cold surface
             endif               ! tmask
          enddo                  ! i
@@ -1737,7 +1736,9 @@
             i = indxi(ij)
             j = indxj(ij)
 
-            hbar = hice_ext(i,j,1)*1.2      ! Factor to bump up hice
+            ! thickness of the ice-covered part of the cell (hice_ext is
+            ! not modified, it is used again for the boundary restoring)
+            hbar = hice_ext(i,j,1)/aice_ext(i,j,1)*1.2  ! Factor to bump up hice
             sum = c0
             do n = 1, ncat
                ! parabola, max at h=hbar, zero at h=0, 2*hbar

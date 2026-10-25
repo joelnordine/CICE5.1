@@ -636,7 +636,7 @@
 !! Added aice_ext & vicer 2019/1/9
 !! Changed vicer to hice_ext 2019/2/14
       real (kind=dbl_kind), dimension (nx_block,ny_block), &
-         intent(inout) :: &
+         intent(in) :: &
          aice_ext,  & ! concentration of ice (all categories)
          hice_ext     ! thickness of ice (all categories)
 
@@ -717,7 +717,6 @@
                   icells = icells + 1
                   indxi(icells) = i
                   indxj(icells) = j
-                  hice_ext (i,j) = hice_ext(i,j)/aice_ext(i,j)
                endif            ! cold surface
             endif               ! tmask
          enddo                  ! i
@@ -727,7 +726,9 @@
          i = indxi(ij)
          j = indxj(ij)
 
-         hbar = hice_ext(i,j)
+         ! thickness of the ice-covered part of the cell; hice_ext itself
+         ! is not modified, since this routine is called every time step
+         hbar = hice_ext(i,j)/aice_ext(i,j)
          sum = c0
          do n = 1, ncat
             ! parabola, max at h=hbar, zero at h=0, 2*hbar
