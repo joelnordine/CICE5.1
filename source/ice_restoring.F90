@@ -19,12 +19,27 @@
 
       implicit none
       private
-      public :: ice_HaloRestore_init, ice_HaloRestore, ice_open_bdy_velocity
+      public :: ice_HaloRestore_init, ice_HaloRestore, ice_bdy_init, &
+                ice_bdy_velocity
       save
 
       logical (kind=log_kind), public :: &
          restore_ice             , & ! restore ice state if true
-         open_bdy_outflow            ! let ice flow out through open boundaries
+         open_bdy_outflow            ! treat all 'closed' boundaries as 'open'
+
+      ! type of each domain boundary for the ice (namelist):
+      ! 'closed' - no ice crosses the boundary; with restore_ice the edge
+      !            row is restored to aice_ext/hice_ext on inflow
+      ! 'open'   - as 'closed', but ice can leave on outflow
+      ! 'forced' - as 'open', and the ice velocity on the edge row is
+      !            prescribed by uvel_ext/vvel_ext where aice_ext > puny
+      character (len=char_len), public :: &
+         ice_bdy_west, ice_bdy_east, ice_bdy_south, ice_bdy_north
+
+      ! boundary flags, index 1:4 = west, east, south, north
+      logical (kind=log_kind), dimension(4), public :: &
+         bdy_outflow , & ! ice can leave through the boundary
+         bdy_forced      ! ice velocity prescribed from external data
 
       !-----------------------------------------------------------------
       ! state of the ice for each category
@@ -65,6 +80,7 @@
       use ice_itd, only: aggregate
       use ice_restart_shared, only: restart_ext
       use ice_state, only: aice_ext, hice_ext
+      use ice_exit, only: abort_ice
 
    integer (int_kind) :: &
      i,j,iblk,nt,n,      &! dummy loop indices
@@ -83,6 +99,15 @@
 
    type (block) :: &
      this_block  ! block info for current block
+
+   if ((bdy_outflow(1) .or. bdy_outflow(2)) .and. &
+       trim(ew_boundary_type) /= 'open') call abort_ice( &
+      'ice_HaloRestore_init: open/forced west/east ice boundaries '// &
+      'require ew_boundary_type = open')
+   if ((bdy_outflow(3) .or. bdy_outflow(4)) .and. &
+       trim(ns_boundary_type) /= 'open') call abort_ice( &
+      'ice_HaloRestore_init: open/forced south/north ice boundaries '// &
+      'require ns_boundary_type = open')
 
    if (.not. restore_ice) return
 
@@ -906,7 +931,7 @@
 !! Changed vicer to hice_ext 2019/2/14
       use ice_flux, only: sst, Tf, Tair, salinz, Tmltz, &
                           uocn, vocn
-      use ice_state, only: aice_ext, hice_ext
+      use ice_state, only: aice_ext, hice_ext, uvel_ext, vvel_ext
 
 !-----------------------------------------------------------------------
 !
@@ -930,6 +955,9 @@
 
    real (dbl_kind) :: &
      ctime                ! dt/trest
+
+   logical (log_kind) :: &
+     linflow              ! ice is moving into the domain
 
    call ice_timer_start(timer_bound)
 
@@ -1001,8 +1029,13 @@
             do j = 1, ny_block
             do i = 1, ilo
               if (tmask(i,j,iblk)) then
-                if (uvel(i,j,iblk) > c0 .or. &  ! ice velocity is inward
-                    uocn(i,j,iblk) > c0) then   ! ocean current is inward
+                if (bdy_forced(1)) then
+                  linflow = uvel_ext(i,j,iblk) > c0     ! external ice velocity is inward
+                else
+                  linflow = uvel(i,j,iblk) > c0 .or. &  ! ice velocity is inward
+                            uocn(i,j,iblk) > c0       ! ocean current is inward
+                endif
+                if (linflow) then
                   aicen(i,j,n,iblk) = aicen(i,j,n,iblk) &
                      + (aicen_rest(i,j,n,iblk)-aicen(i,j,n,iblk))*ctime
                   vicen(i,j,n,iblk) = vicen(i,j,n,iblk) &
@@ -1021,7 +1054,7 @@
 
             do j = 1, ny_block
               do i = 1, ilo
-                if (umask(i,j,iblk) .and. .not. open_bdy_outflow) then
+                if (umask(i,j,iblk) .and. .not. bdy_outflow(1)) then
                   uvel(i,j,iblk) = uvel(ilo+1,j,iblk)
                   vvel(i,j,iblk) = c0 ! make ice drift strictly normal to boundary
                   strength(i,j,iblk) = strength(ilo+1,j,iblk)
@@ -1050,8 +1083,13 @@
             do j = 1, ny_block
             do i = ihi, ibc
               if (tmask(i,j,iblk)) then
-                if (uvel(i,j,iblk) < c0 .or. &  ! ice velocity is inward
-                    uocn(i,j,iblk) < c0) then   ! ocean current is inward
+                if (bdy_forced(2)) then
+                  linflow = uvel_ext(i,j,iblk) < c0     ! external ice velocity is inward
+                else
+                  linflow = uvel(i,j,iblk) < c0 .or. &  ! ice velocity is inward
+                            uocn(i,j,iblk) < c0       ! ocean current is inward
+                endif
+                if (linflow) then
                   aicen(i,j,n,iblk) = aicen(i,j,n,iblk) &
                      + (aicen_rest(i,j,n,iblk)-aicen(i,j,n,iblk))*ctime
                   vicen(i,j,n,iblk) = vicen(i,j,n,iblk) &
@@ -1070,7 +1108,7 @@
 
             do j = 1, ny_block
               do i = ihi, ibc
-                if (umask(i,j,iblk) .and. .not. open_bdy_outflow) then
+                if (umask(i,j,iblk) .and. .not. bdy_outflow(2)) then
                   uvel(i,j,iblk) = uvel(ihi-1,j,iblk)
                   vvel(i,j,iblk) = c0
                   strength(i,j,iblk) = strength(ihi-1,j,iblk)
@@ -1087,8 +1125,13 @@
             do j = 1, jlo
             do i = 1, nx_block
               if (tmask(i,j,iblk)) then
-                if (vvel(i,j,iblk) > c0 .or. &  ! ice velocity is inward
-                    vocn(i,j,iblk) > c0) then   ! ocean current is inward
+                if (bdy_forced(3)) then
+                  linflow = vvel_ext(i,j,iblk) > c0     ! external ice velocity is inward
+                else
+                  linflow = vvel(i,j,iblk) > c0 .or. &  ! ice velocity is inward
+                            vocn(i,j,iblk) > c0       ! ocean current is inward
+                endif
+                if (linflow) then
                   aicen(i,j,n,iblk) = aicen(i,j,n,iblk) &
                      + (aicen_rest(i,j,n,iblk)-aicen(i,j,n,iblk))*ctime
                   vicen(i,j,n,iblk) = vicen(i,j,n,iblk) &
@@ -1107,7 +1150,7 @@
 
             do j = 1, jlo
               do i = 1, nx_block
-                if (umask(i,j,iblk) .and. .not. open_bdy_outflow) then
+                if (umask(i,j,iblk) .and. .not. bdy_outflow(3)) then
                   uvel(i,j,iblk) = c0
                   vvel(i,j,iblk) = vvel(i,jlo+1,iblk)
                   strength(i,j,iblk) = strength(i,jlo+1,iblk)
@@ -1138,8 +1181,13 @@
             do j = jhi, ibc
             do i = 1, nx_block
               if (tmask(i,j,iblk)) then
-                if (vvel(i,j,iblk) < c0 .or. &  ! ice velocity is inward
-                    vocn(i,j,iblk) < c0) then   ! ocean current is inward
+                if (bdy_forced(4)) then
+                  linflow = vvel_ext(i,j,iblk) < c0     ! external ice velocity is inward
+                else
+                  linflow = vvel(i,j,iblk) < c0 .or. &  ! ice velocity is inward
+                            vocn(i,j,iblk) < c0       ! ocean current is inward
+                endif
+                if (linflow) then
                   aicen(i,j,n,iblk) = aicen(i,j,n,iblk) &
                      + (aicen_rest(i,j,n,iblk)-aicen(i,j,n,iblk))*ctime
                   vicen(i,j,n,iblk) = vicen(i,j,n,iblk) &
@@ -1158,7 +1206,7 @@
 
             do j = jhi, ibc
               do i = 1, nx_block
-                if (umask(i,j,iblk) .and. .not. open_bdy_outflow) then
+                if (umask(i,j,iblk) .and. .not. bdy_outflow(4)) then
                   uvel(i,j,iblk) = c0
                   vvel(i,j,iblk) = vvel(i,jhi-1,iblk)
                   strength(i,j,iblk) = strength(i,jhi-1,iblk)
@@ -1189,37 +1237,98 @@
 
 !=======================================================================
 
-!  Set the ice velocity on open domain boundaries so that ice can be
-!  advected out of a regional domain.
+!  Set the boundary flags from the namelist boundary types.
+
+ subroutine ice_bdy_init
+
+      use ice_constants, only: c0
+      use ice_exit, only: abort_ice
+      use ice_state, only: uvel_ext, vvel_ext
+
+   character (len=char_len) :: &
+     bdy_type(4)          ! boundary types (west, east, south, north)
+
+   integer (int_kind) :: &
+     n                    ! boundary index
+
+   bdy_type = (/ ice_bdy_west, ice_bdy_east, ice_bdy_south, ice_bdy_north /)
+
+   do n = 1, 4
+      if (open_bdy_outflow .and. trim(bdy_type(n)) == 'closed') &
+         bdy_type(n) = 'open'
+      select case (trim(bdy_type(n)))
+      case ('closed')
+         bdy_outflow(n) = .false.
+         bdy_forced (n) = .false.
+      case ('open')
+         bdy_outflow(n) = .true.
+         bdy_forced (n) = .false.
+      case ('forced')
+         bdy_outflow(n) = .true.
+         bdy_forced (n) = .true.
+      case default
+         call abort_ice('ice_bdy_init: ice_bdy_west/east/south/north '// &
+                        'must be closed, open or forced')
+      end select
+   enddo
+
+   ice_bdy_west  = bdy_type(1)
+   ice_bdy_east  = bdy_type(2)
+   ice_bdy_south = bdy_type(3)
+   ice_bdy_north = bdy_type(4)
+
+   if (any(bdy_forced) .and. .not. restore_ice) &
+      call abort_ice('ice_bdy_init: forced ice boundaries require '// &
+                     'restore_ice = .true.')
+
+   uvel_ext(:,:,:) = c0
+   vvel_ext(:,:,:) = c0
+
+ end subroutine ice_bdy_init
+
+!=======================================================================
+
+!  Set the ice velocity on open and forced domain boundaries.
 !  The velocity points on the outer edge of the domain lie in the halo
 !  (west and south edges) or are masked as land because they touch a
 !  ghost cell (east and north edges), so the dynamics leave them at zero
-!  and no ice can cross the boundary. Here the normal velocity on the
-!  boundary is copied from the adjacent interior velocity point where it
-!  is directed out of the domain. Inward velocities and the tangential
-!  component are set to zero; ice enters through ice_HaloRestore.
+!  and no ice can cross the boundary.
+!  - forced boundaries: the velocity at the inner corners of the edge row
+!    (first row of physical cells) is set to the external ice velocity
+!    uvel_ext/vvel_ext where the external data have ice (aice_ext > puny)
+!    in an adjacent edge cell; elsewhere the model velocity is kept.
+!  - open and forced boundaries: the normal velocity on the boundary is
+!    copied from the adjacent inner corner where it is directed out of
+!    the domain. Inward velocities and the tangential component are set
+!    to zero (the ghost cells hold no ice); ice enters through
+!    ice_HaloRestore, which restores the edge row on inflow.
 !  Call after the dynamics and before the transport.
 !  Note: This routine assumes nghost = 1.
 
- subroutine ice_open_bdy_velocity
+ subroutine ice_bdy_velocity
 
       use ice_blocks, only: block, get_block, nblocks_x, nblocks_y
-      use ice_constants, only: c0
-      use ice_domain, only: ew_boundary_type, ns_boundary_type, &
-          nblocks, blocks_ice
+      use ice_constants, only: c0, puny
+      use ice_domain, only: nblocks, blocks_ice
+      use ice_grid, only: umask
+      use ice_state, only: aice_ext, uvel_ext, vvel_ext
 
    integer (int_kind) :: &
      i,j,iblk,           &! dummy loop indices
+     ip,jp,              &! i+1, j+1 limited to the block
      ilo,ihi,jlo,jhi      ! beginning and end of physical domain
+
+   logical (log_kind) :: &
+     lforce               ! prescribe the external velocity
 
    type (block) :: &
      this_block  ! block info for current block
 
-   if (.not. open_bdy_outflow) return
+   if (.not. any(bdy_outflow)) return
 
    call ice_timer_start(timer_bound)
 
-   !$OMP PARALLEL DO PRIVATE(iblk,ilo,ihi,jlo,jhi,this_block,i,j)
+   !$OMP PARALLEL DO PRIVATE(iblk,ilo,ihi,jlo,jhi,this_block,i,j,ip,jp,lforce)
    do iblk = 1, nblocks
       this_block = get_block(blocks_ice(iblk),iblk)
          ilo = this_block%ilo
@@ -1230,40 +1339,60 @@
       ! The loops include the halo rows/columns of the block, which hold
       ! valid velocities from the neighboring blocks after the dynamics.
 
-      if (this_block%iblock == 1) then              ! west edge
-         if (trim(ew_boundary_type) == 'open') then
-            do j = 1, ny_block
-               uvel(ilo-1,j,iblk) = min(uvel(ilo,j,iblk), c0)
-               vvel(ilo-1,j,iblk) = c0
-            enddo
-         endif
+      if (this_block%iblock == 1 .and. bdy_outflow(1)) then         ! west edge
+         do j = 1, ny_block
+            jp = min(j+1, ny_block)
+            lforce = bdy_forced(1) .and. umask(ilo,j,iblk) .and. &
+                     max(aice_ext(ilo,j,iblk), aice_ext(ilo,jp,iblk)) > puny
+            if (lforce) then
+               uvel(ilo,j,iblk) = uvel_ext(ilo,j,iblk)
+               vvel(ilo,j,iblk) = vvel_ext(ilo,j,iblk)
+            endif
+            uvel(ilo-1,j,iblk) = min(uvel(ilo,j,iblk), c0)
+            vvel(ilo-1,j,iblk) = c0
+         enddo
       endif
 
-      if (this_block%iblock == nblocks_x) then      ! east edge
-         if (trim(ew_boundary_type) == 'open') then
-            do j = 1, ny_block
-               uvel(ihi,j,iblk) = max(uvel(ihi-1,j,iblk), c0)
-               vvel(ihi,j,iblk) = c0
-            enddo
-         endif
+      if (this_block%iblock == nblocks_x .and. bdy_outflow(2)) then ! east edge
+         do j = 1, ny_block
+            jp = min(j+1, ny_block)
+            lforce = bdy_forced(2) .and. umask(ihi-1,j,iblk) .and. &
+                     max(aice_ext(ihi,j,iblk), aice_ext(ihi,jp,iblk)) > puny
+            if (lforce) then
+               uvel(ihi-1,j,iblk) = uvel_ext(ihi-1,j,iblk)
+               vvel(ihi-1,j,iblk) = vvel_ext(ihi-1,j,iblk)
+            endif
+            uvel(ihi,j,iblk) = max(uvel(ihi-1,j,iblk), c0)
+            vvel(ihi,j,iblk) = c0
+         enddo
       endif
 
-      if (this_block%jblock == 1) then              ! south edge
-         if (trim(ns_boundary_type) == 'open') then
-            do i = 1, nx_block
-               uvel(i,jlo-1,iblk) = c0
-               vvel(i,jlo-1,iblk) = min(vvel(i,jlo,iblk), c0)
-            enddo
-         endif
+      if (this_block%jblock == 1 .and. bdy_outflow(3)) then         ! south edge
+         do i = 1, nx_block
+            ip = min(i+1, nx_block)
+            lforce = bdy_forced(3) .and. umask(i,jlo,iblk) .and. &
+                     max(aice_ext(i,jlo,iblk), aice_ext(ip,jlo,iblk)) > puny
+            if (lforce) then
+               uvel(i,jlo,iblk) = uvel_ext(i,jlo,iblk)
+               vvel(i,jlo,iblk) = vvel_ext(i,jlo,iblk)
+            endif
+            uvel(i,jlo-1,iblk) = c0
+            vvel(i,jlo-1,iblk) = min(vvel(i,jlo,iblk), c0)
+         enddo
       endif
 
-      if (this_block%jblock == nblocks_y) then      ! north edge
-         if (trim(ns_boundary_type) == 'open') then
-            do i = 1, nx_block
-               uvel(i,jhi,iblk) = c0
-               vvel(i,jhi,iblk) = max(vvel(i,jhi-1,iblk), c0)
-            enddo
-         endif
+      if (this_block%jblock == nblocks_y .and. bdy_outflow(4)) then ! north edge
+         do i = 1, nx_block
+            ip = min(i+1, nx_block)
+            lforce = bdy_forced(4) .and. umask(i,jhi-1,iblk) .and. &
+                     max(aice_ext(i,jhi,iblk), aice_ext(ip,jhi,iblk)) > puny
+            if (lforce) then
+               uvel(i,jhi-1,iblk) = uvel_ext(i,jhi-1,iblk)
+               vvel(i,jhi-1,iblk) = vvel_ext(i,jhi-1,iblk)
+            endif
+            uvel(i,jhi,iblk) = c0
+            vvel(i,jhi,iblk) = max(vvel(i,jhi-1,iblk), c0)
+         enddo
       endif
 
    enddo ! iblk
@@ -1271,7 +1400,7 @@
 
    call ice_timer_stop(timer_bound)
 
- end subroutine ice_open_bdy_velocity
+ end subroutine ice_bdy_velocity
 
 !=======================================================================
 

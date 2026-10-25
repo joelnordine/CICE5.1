@@ -92,7 +92,8 @@
       use ice_therm_mushy, only: a_rapid_mode, Rac_rapid_mode, aspect_rapid_mode, &
                                  dSdt_slow_mode, phi_c_slow_mode, &
                                  phi_i_mushy
-      use ice_restoring, only: restore_ice, open_bdy_outflow
+      use ice_restoring, only: restore_ice, open_bdy_outflow, ice_bdy_init, &
+          ice_bdy_west, ice_bdy_east, ice_bdy_south, ice_bdy_north
 #ifdef CCSMCOUPLED
       use shr_file_mod, only: shr_file_setIO
 #endif
@@ -165,7 +166,8 @@
         oceanmixed_ice, ocn_data_format, sss_data_type, sst_data_type,  &
         ocn_data_dir,   oceanmixed_file, restore_sst,   trestore,       &
         restore_ice,    formdrag,        highfreq,      natmiter,       &
-        tfrz_option,    open_bdy_outflow
+        tfrz_option,    open_bdy_outflow,                               &
+        ice_bdy_west,   ice_bdy_east,    ice_bdy_south, ice_bdy_north
 
       namelist /tracer_nml/   &
         tr_iage, restart_age, &
@@ -300,7 +302,11 @@
       restore_sst     = .false.   ! restore sst if true
       trestore        = 90        ! restoring timescale, days (0 instantaneous)
       restore_ice     = .false.   ! restore ice state on grid edges if true
-      open_bdy_outflow = .false.  ! let ice flow out through open boundaries
+      open_bdy_outflow = .false.  ! treat all 'closed' ice boundaries as 'open'
+      ice_bdy_west    = 'closed'  ! ice boundary types: 'closed', 'open'
+      ice_bdy_east    = 'closed'  !   (ice can leave on outflow) or 'forced'
+      ice_bdy_south   = 'closed'  !   (open, and ice velocity prescribed
+      ice_bdy_north   = 'closed'  !   from external data)
       dbug      = .false.         ! true writes diagnostics for input forcing
 
       latpnt(1) =  90._dbl_kind   ! latitude of diagnostic point 1 (deg)
@@ -760,6 +766,13 @@
       call broadcast_scalar(trestore,           master_task)
       call broadcast_scalar(restore_ice,        master_task)
       call broadcast_scalar(open_bdy_outflow,   master_task)
+      call broadcast_scalar(ice_bdy_west,       master_task)
+      call broadcast_scalar(ice_bdy_east,       master_task)
+      call broadcast_scalar(ice_bdy_south,      master_task)
+      call broadcast_scalar(ice_bdy_north,      master_task)
+
+      call ice_bdy_init  ! set boundary flags from ice_bdy_*
+
       call broadcast_scalar(dbug,               master_task)
       call broadcast_array (latpnt(1:2),        master_task)
       call broadcast_array (lonpnt(1:2),        master_task)
@@ -993,6 +1006,14 @@
                                restore_ice
          write(nu_diag,1010) ' open_bdy_outflow          = ', &
                                open_bdy_outflow
+         write(nu_diag,1030) ' ice_bdy_west              = ', &
+                               trim(ice_bdy_west)
+         write(nu_diag,1030) ' ice_bdy_east              = ', &
+                               trim(ice_bdy_east)
+         write(nu_diag,1030) ' ice_bdy_south             = ', &
+                               trim(ice_bdy_south)
+         write(nu_diag,1030) ' ice_bdy_north             = ', &
+                               trim(ice_bdy_north)
          if (restore_ice .or. restore_sst) &
          write(nu_diag,1020) ' trestore                  = ', trestore
  

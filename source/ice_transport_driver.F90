@@ -637,12 +637,11 @@
       use ice_blocks, only: nx_block, ny_block, block, get_block, nx_block, ny_block
       use ice_constants, only: p5, &
           field_loc_Nface, field_loc_Eface, field_type_vector
-      use ice_domain, only: blocks_ice, halo_info, nblocks, &
-          ew_boundary_type, ns_boundary_type
+      use ice_domain, only: blocks_ice, halo_info, nblocks
       use ice_domain_size, only: ncat, max_blocks
       use ice_state, only: aice0, aicen, vicen, vsnon, trcrn, ntrcr, &
           uvel, vvel, trcr_depend, bound_state
-      use ice_restoring, only: open_bdy_outflow
+      use ice_restoring, only: bdy_outflow
       use ice_grid, only: HTE, HTN, tarea
       use ice_timers, only: ice_timer_start, ice_timer_stop, &
           timer_bound, timer_advect
@@ -712,8 +711,8 @@
 
       ! The halo update sets the edge velocities on open west and south
       ! boundaries to zero; compute them from the boundary velocities
-      ! (see ice_open_bdy_velocity) so ice can flow out.
-      if (open_bdy_outflow) then
+      ! (see ice_bdy_velocity) so ice can flow out.
+      if (bdy_outflow(1) .or. bdy_outflow(3)) then
          !$OMP PARALLEL DO PRIVATE(iblk,i,j,ilo,ihi,jlo,jhi,this_block)
          do iblk = 1, nblocks
             this_block = get_block(blocks_ice(iblk),iblk)
@@ -722,15 +721,13 @@
             jlo = this_block%jlo
             jhi = this_block%jhi
 
-            if (this_block%iblock == 1 .and. &
-                trim(ew_boundary_type) == 'open') then
+            if (this_block%iblock == 1 .and. bdy_outflow(1)) then
                do j = jlo, jhi
                   uee(ilo-1,j,iblk) = p5*(uvel(ilo-1,j,iblk) + uvel(ilo-1,j-1,iblk))
                enddo
             endif
 
-            if (this_block%jblock == 1 .and. &
-                trim(ns_boundary_type) == 'open') then
+            if (this_block%jblock == 1 .and. bdy_outflow(3)) then
                do i = ilo, ihi
                   vnn(i,jlo-1,iblk) = p5*(vvel(i,jlo-1,iblk) + vvel(i-1,jlo-1,iblk))
                enddo

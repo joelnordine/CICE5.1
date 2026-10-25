@@ -77,7 +77,9 @@
       real (kind=dbl_kind), &
          dimension(nx_block,ny_block,max_blocks), public :: &
          aice_ext , & ! sea ice concentration from external source
-         hice_ext     ! sea ice thickness from external source (m)
+         hice_ext , & ! sea ice thickness from external source (m)
+         uvel_ext , & ! sea ice x-velocity from external source (m/s, U grid)
+         vvel_ext     ! sea ice y-velocity from external source (m/s, U grid)
 
       real (kind=dbl_kind), public, &
          dimension (nx_block,ny_block,max_ntrcr,ncat,max_blocks) :: &
