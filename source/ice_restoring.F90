@@ -33,6 +33,7 @@
       ! 'open'   - as 'closed', but ice can leave on outflow
       ! 'forced' - as 'open', and the ice velocity on the edge row is
       !            prescribed by uvel_ext/vvel_ext where aice_ext > puny
+      !            (on outflow it is never slower than the model's)
       character (len=char_len), public :: &
          ice_bdy_west, ice_bdy_east, ice_bdy_south, ice_bdy_north
 
@@ -1293,10 +1294,14 @@
 !  (west and south edges) or are masked as land because they touch a
 !  ghost cell (east and north edges), so the dynamics leave them at zero
 !  and no ice can cross the boundary.
-!  - forced boundaries: the velocity at the inner corners of the edge row
-!    (first row of physical cells) is set to the external ice velocity
-!    uvel_ext/vvel_ext where the external data have ice (aice_ext > puny)
-!    in an adjacent edge cell; elsewhere the model velocity is kept.
+!  - forced boundaries: where the external data have ice (aice_ext > puny)
+!    in an adjacent edge cell, the velocity at the inner corners of the
+!    edge row (first row of physical cells) is set to the external ice
+!    velocity uvel_ext/vvel_ext if that is directed into the domain. If it
+!    is directed out of the domain, the normal velocity is the more outward
+!    of the model and external velocities, so that the forcing never slows
+!    down outflowing ice (which would make it pile up at the boundary).
+!    Elsewhere the model velocity is kept.
 !  - open and forced boundaries: the normal velocity on the boundary is
 !    copied from the adjacent inner corner where it is directed out of
 !    the domain. Inward velocities and the tangential component are set
@@ -1345,8 +1350,12 @@
             lforce = bdy_forced(1) .and. umask(ilo,j,iblk) .and. &
                      max(aice_ext(ilo,j,iblk), aice_ext(ilo,jp,iblk)) > puny
             if (lforce) then
-               uvel(ilo,j,iblk) = uvel_ext(ilo,j,iblk)
-               vvel(ilo,j,iblk) = vvel_ext(ilo,j,iblk)
+               if (uvel_ext(ilo,j,iblk) > c0) then   ! inflow
+                  uvel(ilo,j,iblk) = uvel_ext(ilo,j,iblk)
+                  vvel(ilo,j,iblk) = vvel_ext(ilo,j,iblk)
+               else                                ! outflow
+                  uvel(ilo,j,iblk) = min(uvel(ilo,j,iblk), uvel_ext(ilo,j,iblk))
+               endif
             endif
             uvel(ilo-1,j,iblk) = min(uvel(ilo,j,iblk), c0)
             vvel(ilo-1,j,iblk) = c0
@@ -1359,8 +1368,12 @@
             lforce = bdy_forced(2) .and. umask(ihi-1,j,iblk) .and. &
                      max(aice_ext(ihi,j,iblk), aice_ext(ihi,jp,iblk)) > puny
             if (lforce) then
-               uvel(ihi-1,j,iblk) = uvel_ext(ihi-1,j,iblk)
-               vvel(ihi-1,j,iblk) = vvel_ext(ihi-1,j,iblk)
+               if (uvel_ext(ihi-1,j,iblk) < c0) then   ! inflow
+                  uvel(ihi-1,j,iblk) = uvel_ext(ihi-1,j,iblk)
+                  vvel(ihi-1,j,iblk) = vvel_ext(ihi-1,j,iblk)
+               else                                ! outflow
+                  uvel(ihi-1,j,iblk) = max(uvel(ihi-1,j,iblk), uvel_ext(ihi-1,j,iblk))
+               endif
             endif
             uvel(ihi,j,iblk) = max(uvel(ihi-1,j,iblk), c0)
             vvel(ihi,j,iblk) = c0
@@ -1373,8 +1386,12 @@
             lforce = bdy_forced(3) .and. umask(i,jlo,iblk) .and. &
                      max(aice_ext(i,jlo,iblk), aice_ext(ip,jlo,iblk)) > puny
             if (lforce) then
-               uvel(i,jlo,iblk) = uvel_ext(i,jlo,iblk)
-               vvel(i,jlo,iblk) = vvel_ext(i,jlo,iblk)
+               if (vvel_ext(i,jlo,iblk) > c0) then   ! inflow
+                  uvel(i,jlo,iblk) = uvel_ext(i,jlo,iblk)
+                  vvel(i,jlo,iblk) = vvel_ext(i,jlo,iblk)
+               else                                ! outflow
+                  vvel(i,jlo,iblk) = min(vvel(i,jlo,iblk), vvel_ext(i,jlo,iblk))
+               endif
             endif
             uvel(i,jlo-1,iblk) = c0
             vvel(i,jlo-1,iblk) = min(vvel(i,jlo,iblk), c0)
@@ -1387,8 +1404,12 @@
             lforce = bdy_forced(4) .and. umask(i,jhi-1,iblk) .and. &
                      max(aice_ext(i,jhi,iblk), aice_ext(ip,jhi,iblk)) > puny
             if (lforce) then
-               uvel(i,jhi-1,iblk) = uvel_ext(i,jhi-1,iblk)
-               vvel(i,jhi-1,iblk) = vvel_ext(i,jhi-1,iblk)
+               if (vvel_ext(i,jhi-1,iblk) < c0) then   ! inflow
+                  uvel(i,jhi-1,iblk) = uvel_ext(i,jhi-1,iblk)
+                  vvel(i,jhi-1,iblk) = vvel_ext(i,jhi-1,iblk)
+               else                                ! outflow
+                  vvel(i,jhi-1,iblk) = max(vvel(i,jhi-1,iblk), vvel_ext(i,jhi-1,iblk))
+               endif
             endif
             uvel(i,jhi,iblk) = c0
             vvel(i,jhi,iblk) = max(vvel(i,jhi-1,iblk), c0)
